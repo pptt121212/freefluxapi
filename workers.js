@@ -1,8 +1,8 @@
 // Constants
 const IMAGE_API_URL = 'https://api.siliconflow.cn/v1/image/generations';
-const IMAGE_API_KEY = 'sk-cnjemsxjwcfindppllcwwbevyltkeffpkwzfogvptyneuopx';
+const IMAGE_API_KEY = '';
 const PROCESS_API_URL = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
-const PROCESS_API_KEY = 'c1aa1d070a5193fe6dd3b9765a3fa2bf.32cstRfxDGqLiSb6';
+const PROCESS_API_KEY = '';
 const DEFAULT_SIZE = '512x512';
 const SIZE_REGEX = /^\d+x\d+$/;
 const NON_ASCII_REGEX = /[^\x00-\x7F]/;
