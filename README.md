@@ -58,7 +58,7 @@ https://your-worker-url/?prompt=一位女孩&size=512x512&optimization=1
 
 ### 2. 设置项目
 1. 登录到 Cloudflare 控制面板，创建新的 Worker。
-2. 将workers.js代码复制并粘贴到 Worker 的编辑器中。
+2. 将[workers.js](https://github.com/pptt121212/freefluxapi/blob/main/workers.js)代码复制并粘贴到 Worker 的编辑器中。
 3. 替换 API 的密钥和 URL 为您的实际值。
 
 ### 3. 保存并部署
