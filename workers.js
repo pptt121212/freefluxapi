@@ -1,8 +1,8 @@
 // Constants
 const IMAGE_API_URL = 'https://api.siliconflow.cn/v1/image/generations';
-const IMAGE_API_KEY = '';
+const IMAGE_API_KEY = 'sk-cnjemsxjwcfindppllcwwbevyltkeffpkwzfogvptyneuopx';
 const PROCESS_API_URL = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
-const PROCESS_API_KEY = '';
+const PROCESS_API_KEY = 'c1aa1d070a5193fe6dd3b9765a3fa2bf.32cstRfxDGqLiSb6';
 const DEFAULT_SIZE = '512x512';
 const SIZE_REGEX = /^\d+x\d+$/;
 const NON_ASCII_REGEX = /[^\x00-\x7F]/;
@@ -14,6 +14,14 @@ addEventListener('fetch', event => {
 async function handleRequest(request) {
   try {
     const url = new URL(request.url);
+    
+    // Check if the request is for the GUI page
+    if (url.pathname === '/GUI/') {
+      return new Response(getGuiPage(), {
+        headers: { 'Content-Type': 'text/html' }
+      });
+    }
+
     const prompt = url.searchParams.get('prompt');
 
     // Check if the prompt is valid
@@ -162,6 +170,74 @@ function getUsageInstructions() {
     </ul>
 
     <p>如有任何问题，请随时联系支持团队！</p>
+  </body>
+  </html>
+  `;
+}
+
+// 添加图形化用户界面功能
+function getGuiPage() {
+  return `
+  <!DOCTYPE html>
+  <html lang="zh">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>图像生成 GUI</title>
+  </head>
+  <body>
+    <h1>图像生成</h1>
+    <form id="imageForm">
+      <label for="prompt">图像描述:</label><br>
+      <input type="text" id="prompt" required><br><br>
+
+      <label for="size">图像尺寸 (格式: 宽度x高度，默认: 512x512):</label><br>
+      <input type="text" id="size" value="512x512" required><br><br>
+
+      <label for="optimization">是否优化:</label><br>
+      <select id="optimization">
+        <option value="0">不优化</option>
+        <option value="1">优化</option>
+      </select>
+      <p>优化选项说明: 选择“优化”将使生成的图像具有更丰富的细节和构图。</p><br>
+
+      <button type="submit">生成图像</button>
+    </form>
+
+    <h2>生成结果:</h2>
+    <div id="result"></div>
+    <div id="status"></div>
+
+    <script>
+      document.getElementById('imageForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const prompt = document.getElementById('prompt').value;
+        const size = document.getElementById('size').value;
+        const optimization = document.getElementById('optimization').value;
+
+        // 更新状态信息
+        document.getElementById('status').innerText = '正在处理请求...';
+
+        try {
+          const response = await fetch(\`/\?prompt=\${encodeURIComponent(prompt)}&size=\${size}&optimization=\${optimization}\`);
+          if (response.ok) {
+            const blob = await response.blob();
+            const img = document.createElement('img');
+            img.src = URL.createObjectURL(blob);
+            img.style.maxWidth = '100%';
+            document.getElementById('result').innerHTML = '';
+            document.getElementById('result').appendChild(img);
+            document.getElementById('status').innerText = '图像生成成功！';
+          } else {
+            document.getElementById('result').innerText = '生成图像失败: ' + response.statusText;
+            document.getElementById('status').innerText = '请求失败，状态码: ' + response.status;
+          }
+        } catch (error) {
+          document.getElementById('result').innerText = '生成图像过程中出现错误: ' + error.message;
+          document.getElementById('status').innerText = '错误信息: ' + error.message;
+        }
+      });
+    </script>
   </body>
   </html>
   `;
