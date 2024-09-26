@@ -1,57 +1,54 @@
 // Constants
-const IMAGE_API_URL = 'https://api.siliconflow.cn/v1/image/generations'
-const IMAGE_API_KEY = ''
-const PROCESS_API_URL = 'https://open.bigmodel.cn/api/paas/v4/chat/completions'
-const PROCESS_API_KEY = ''
-const DEFAULT_SIZE = '512x512'
-const SIZE_REGEX = /^\d+x\d+$/
-const NON_ASCII_REGEX = /[^\x00-\x7F]/
+const IMAGE_API_URL = 'https://api.siliconflow.cn/v1/image/generations';
+const IMAGE_API_KEY = '';
+const PROCESS_API_URL = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
+const PROCESS_API_KEY = '';
+const DEFAULT_SIZE = '512x512';
+const SIZE_REGEX = /^\d+x\d+$/;
+const NON_ASCII_REGEX = /[^\x00-\x7F]/;
 
 addEventListener('fetch', event => {
-  event.respondWith(handleRequest(event.request))
-})
+  event.respondWith(handleRequest(event.request));
+});
 
 async function handleRequest(request) {
   try {
-    const url = new URL(request.url)
+    const url = new URL(request.url);
+    const prompt = url.searchParams.get('prompt');
 
-    // Check if the request is for the main page
-    if (url.pathname === '/') {
+    // Check if the prompt is valid
+    if (!prompt) {
       return new Response(getUsageInstructions(), {
         headers: { 'Content-Type': 'text/html' }
-      })
+      });
     }
 
-    const { prompt, size, optimization } = parseRequestParams(request)
-    const processedPrompt = await getProcessedPrompt(prompt, optimization)
-    const imageUrl = await getImageUrl(processedPrompt, size)
-    return await fetchAndReturnImage(imageUrl)
+    const { size, optimization } = parseRequestParams(request);
+    const processedPrompt = await getProcessedPrompt(prompt, optimization);
+    const imageUrl = await getImageUrl(processedPrompt, size);
+    return await fetchAndReturnImage(imageUrl);
   } catch (error) {
-    return new Response(error.message, { status: error.status || 500 })
+    return new Response(error.message, { status: error.status || 500 });
   }
 }
 
 function parseRequestParams(request) {
-  const url = new URL(request.url)
-  const prompt = url.searchParams.get('prompt')
-  const size = url.searchParams.get('size') || DEFAULT_SIZE
-  const optimization = url.searchParams.get('optimization') === '1'
+  const url = new URL(request.url);
+  const size = url.searchParams.get('size') || DEFAULT_SIZE;
+  const optimization = url.searchParams.get('optimization') === '1';
 
-  if (!prompt) {
-    throw new Error('Missing prompt parameter')
-  }
   if (!SIZE_REGEX.test(size)) {
-    throw new Error('Invalid size parameter. Use format: widthxheight')
+    throw new Error('Invalid size parameter. Use format: widthxheight');
   }
 
-  return { prompt, size, optimization }
+  return { size, optimization };
 }
 
 async function getProcessedPrompt(prompt, optimization) {
   if (!NON_ASCII_REGEX.test(prompt) && !optimization) {
-    return prompt
+    return prompt;
   }
-  return processPrompt(prompt, optimization)
+  return processPrompt(prompt, optimization);
 }
 
 async function getImageUrl(prompt, size) {
@@ -67,28 +64,28 @@ async function getImageUrl(prompt, size) {
       prompt,
       image_size: size
     })
-  })
+  });
 
   if (!response.ok) {
-    throw new Error(`API error: ${response.status}`)
+    throw new Error(`API error: ${response.status}`);
   }
 
-  const data = await response.json()
-  const imageUrl = data?.images?.[0]?.url
+  const data = await response.json();
+  const imageUrl = data?.images?.[0]?.url;
 
   if (!imageUrl) {
-    throw new Error('Unexpected API response format')
+    throw new Error('Unexpected API response format');
   }
 
-  return imageUrl
+  return imageUrl;
 }
 
 async function fetchAndReturnImage(imageUrl) {
-  const imageResponse = await fetch(imageUrl)
-  const imageBlob = await imageResponse.blob()
+  const imageResponse = await fetch(imageUrl);
+  const imageBlob = await imageResponse.blob();
   return new Response(imageBlob, {
     headers: { 'Content-Type': imageResponse.headers.get('Content-Type') }
-  })
+  });
 }
 
 async function processPrompt(text, optimize) {
@@ -102,7 +99,7 @@ async function processPrompt(text, optimize) {
     2. <英文TAG标签>中每个词组用逗号","分割，逗号","前后不允许有"空格"。
     # 仅仅输出优化后的图像prompt，不要有其他说明：
     `
-    : `请将以下内容翻译为英文，保持原意：${text}`
+    : `请将以下内容翻译为英文，保持原意：${text}`;
 
   const response = await fetch(PROCESS_API_URL, {
     method: 'POST',
@@ -114,14 +111,14 @@ async function processPrompt(text, optimize) {
       model: "GLM-4-Flash",
       messages: [{ role: "user", content }]
     })
-  })
+  });
 
   if (!response.ok) {
-    throw new Error(`Translation/Optimization API error: ${response.status}`)
+    throw new Error(`Translation/Optimization API error: ${response.status}`);
   }
 
-  const data = await response.json()
-  return data.choices?.[0]?.message?.content?.trim() || text
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content?.trim() || text;
 }
 
 // 函数：返回使用说明的HTML内容
@@ -167,5 +164,5 @@ function getUsageInstructions() {
     <p>如有任何问题，请随时联系支持团队！</p>
   </body>
   </html>
-  `
+  `;
 }
