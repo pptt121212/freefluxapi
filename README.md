@@ -55,14 +55,23 @@ https://your-worker-url/?prompt=一位女孩&size=512x512&optimization=1
 ## 部署指南
 
 ### 1. 依赖项
-确保您已经在 [Cloudflare](https://www.cloudflare.com/) 注册账户并设置 Workers。
+确保您已经在 [Cloudflare](https://www.cloudflare.com/) 注册账户并可以正常添加 Workers。
 
-### 2. 设置项目
+### 2.配置KV空间
+在 Cloudflare Workers 中创建两个 KV 命名空间：API_COUNTER 和 API_KEYS。
+在 API_KEYS 命名空间中添加以下键/值对：
+imageApiKeys：包含所有图像生成 API 密钥的 JSON 数组，格式：`["key1", "key2", "key3", "key4", "key5"]`
+processApiKey：用于提示处理 API 密钥
+**API_COUNTER空间不需要添加任何键值。**
+
+在 Worker 设置中绑定这两个 KV 命名空间。
+替换workers代码 ERROR_IMAGE_URLS 中的 URL 为你自己的错误图片 URL。
+
+### 3. 设置项目
 1. 登录到 Cloudflare 控制面板，创建新的 Worker。
 2. 将[workers.js](https://github.com/pptt121212/freefluxapi/blob/main/workers.js)代码复制并粘贴到 Worker 的编辑器中。
-3. 替换 API 的密钥和 URL 为您的实际值。
 
-### 3. 保存并部署
+### 4. 保存并部署
 点击“Save and Deploy”按钮以保存并部署您的 Worker。
 
 ## 贡献
