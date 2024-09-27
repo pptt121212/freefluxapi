@@ -1,11 +1,37 @@
 // Constants
 const IMAGE_API_URL = 'https://api.siliconflow.cn/v1/image/generations';
-const IMAGE_API_KEY = '';
 const PROCESS_API_URL = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
-const PROCESS_API_KEY = '';
 const DEFAULT_SIZE = '512x512';
 const SIZE_REGEX = /^\d+x\d+$/;
 const NON_ASCII_REGEX = /[^\x00-\x7F]/;
+
+const ERROR_IMAGE_URLS = {
+  '400': 'https://www.aisharenet.com/wp-content/uploads/2024/07/99dd797026b75ad.jpg',
+  '401': 'https://www.aisharenet.com/wp-content/uploads/2024/07/99dd797026b75ad.jpg',
+  '404': 'https://www.aisharenet.com/wp-content/uploads/2024/07/99dd797026b75ad.jpg',
+  '429': 'https://www.aisharenet.com/wp-content/uploads/2024/07/99dd797026b75ad.jpg',
+  '503': 'https://www.aisharenet.com/wp-content/uploads/2024/07/99dd797026b75ad.jpg',
+  '504': 'https://www.aisharenet.com/wp-content/uploads/2024/07/99dd797026b75ad.jpg',
+  'default': 'https://www.aisharenet.com/wp-content/uploads/2024/07/99dd797026b75ad.jpg'
+};
+
+// 获取下一个 API 密钥的函数
+async function getNextApiKey() {
+  let counter = await API_COUNTER.get('apiKeyCounter');
+  counter = counter ? parseInt(counter) : 0;
+  
+  const keys = await API_KEYS.get('imageApiKeys', 'json');
+  if (!keys || keys.length === 0) {
+    throw new Error('No API keys available');
+  }
+  
+  const key = keys[counter % keys.length];
+  
+  counter = (counter + 1) % keys.length;
+  await API_COUNTER.put('apiKeyCounter', counter.toString());
+  
+  return key;
+}
 
 addEventListener('fetch', event => {
   event.respondWith(handleRequest(event.request));
@@ -15,7 +41,6 @@ async function handleRequest(request) {
   try {
     const url = new URL(request.url);
     
-    // Check if the request is for the GUI page
     if (url.pathname === '/GUI/') {
       return new Response(getGuiPage(), {
         headers: { 'Content-Type': 'text/html' }
@@ -24,7 +49,6 @@ async function handleRequest(request) {
 
     const prompt = url.searchParams.get('prompt');
 
-    // Check if the prompt is valid
     if (!prompt) {
       return new Response(getUsageInstructions(), {
         headers: { 'Content-Type': 'text/html' }
@@ -36,7 +60,10 @@ async function handleRequest(request) {
     const imageUrl = await getImageUrl(processedPrompt, size);
     return await fetchAndReturnImage(imageUrl);
   } catch (error) {
-    return new Response(error.message, { status: error.status || 500 });
+    console.error('Error in handleRequest:', error);
+    return new Response(ERROR_IMAGE_URLS['default'], {
+      headers: { 'Content-Type': 'text/plain' }
+    });
   }
 }
 
@@ -60,43 +87,61 @@ async function getProcessedPrompt(prompt, optimization) {
 }
 
 async function getImageUrl(prompt, size) {
-  const response = await fetch(IMAGE_API_URL, {
-    method: 'POST',
-    headers: {
-      'Accept': 'application/json',
-      'Authorization': `Bearer ${IMAGE_API_KEY}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: "black-forest-labs/FLUX.1-schnell",
-      prompt,
-      image_size: size
-    })
-  });
+  const apiKey = await getNextApiKey();
+  try {
+    const response = await fetch(IMAGE_API_URL, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: "black-forest-labs/FLUX.1-schnell",
+        prompt,
+        image_size: size
+      })
+    });
 
-  if (!response.ok) {
-    throw new Error(`API error: ${response.status}`);
+    if (!response.ok) {
+      throw new Error(`API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const imageUrl = data?.images?.[0]?.url;
+
+    if (!imageUrl) {
+      throw new Error('Unexpected API response format');
+    }
+
+    return imageUrl;
+  } catch (error) {
+    console.error('Error in getImageUrl:', error);
+    const statusCode = error.message.split(' ').pop();
+    return ERROR_IMAGE_URLS[statusCode] || ERROR_IMAGE_URLS['default'];
   }
-
-  const data = await response.json();
-  const imageUrl = data?.images?.[0]?.url;
-
-  if (!imageUrl) {
-    throw new Error('Unexpected API response format');
-  }
-
-  return imageUrl;
 }
 
 async function fetchAndReturnImage(imageUrl) {
-  const imageResponse = await fetch(imageUrl);
-  const imageBlob = await imageResponse.blob();
-  return new Response(imageBlob, {
-    headers: { 'Content-Type': imageResponse.headers.get('Content-Type') }
-  });
+  try {
+    const imageResponse = await fetch(imageUrl);
+    if (!imageResponse.ok) {
+      throw new Error(`Failed to fetch image: ${imageResponse.status}`);
+    }
+    const imageBlob = await imageResponse.blob();
+    return new Response(imageBlob, {
+      headers: { 'Content-Type': imageResponse.headers.get('Content-Type') }
+    });
+  } catch (error) {
+    console.error('Error in fetchAndReturnImage:', error);
+    return new Response(ERROR_IMAGE_URLS['default'], {
+      headers: { 'Content-Type': 'text/plain' }
+    });
+  }
 }
 
 async function processPrompt(text, optimize) {
+  const processApiKey = await API_KEYS.get('processApiKey');
   const content = optimize 
     ? `
     # 优化以下图像prompt，保留prompt主要元素基础上使细节、构图更加丰富：
@@ -109,27 +154,31 @@ async function processPrompt(text, optimize) {
     `
     : `请将以下内容翻译为英文，保持原意：${text}`;
 
-  const response = await fetch(PROCESS_API_URL, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${PROCESS_API_KEY}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: "GLM-4-Flash",
-      messages: [{ role: "user", content }]
-    })
-  });
+  try {
+    const response = await fetch(PROCESS_API_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${processApiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: "GLM-4-Flash",
+        messages: [{ role: "user", content }]
+      })
+    });
 
-  if (!response.ok) {
-    throw new Error(`Translation/Optimization API error: ${response.status}`);
+    if (!response.ok) {
+      throw new Error(`Translation/Optimization API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data.choices?.[0]?.message?.content?.trim() || text;
+  } catch (error) {
+    console.error('Error in processPrompt:', error);
+    return text; // 如果处理失败，返回原始文本
   }
-
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content?.trim() || text;
 }
 
-// 函数：返回使用说明的HTML内容
 function getUsageInstructions() {
   return `
   <!DOCTYPE html>
@@ -149,7 +198,7 @@ function getUsageInstructions() {
 
     <h3>参数说明</h3>
     <ul>
-      <li><strong>prompt</strong>: (必填) 您想要生成图像的描述文本，例如“一位女孩”。</li>
+      <li><strong>prompt</strong>: (必填) 您想要生成图像的描述文本，例如"一位女孩"。</li>
       <li><strong>size</strong>: (可选) 图像的尺寸，格式为 <code>宽度x高度</code>，默认为 <code>512x512</code>。例如：<code>256x256</code> 或 <code>1024x768</code>。</li>
       <li><strong>optimization</strong>: (可选) 是否进行优化，值为 <code>1</code> 表示进行优化，值为 <code>0</code> 或不提供该参数表示不进行优化。</li>
     </ul>
@@ -160,7 +209,7 @@ function getUsageInstructions() {
     <h2>3. 示例请求</h2>
     <p>您可以通过以下示例请求生成图像：</p>
     <pre>https://your-worker-url/?prompt=一位女孩&size=512x512&optimization=1</pre>
-    <p>此请求将生成一幅描述为“一位女孩”的图像，并将其大小设置为 512x512 像素，并进行优化。</p>
+    <p>此请求将生成一幅描述为"一位女孩"的图像，并将其大小设置为 512x512 像素，并进行优化。</p>
 
     <h2>4. 注意事项</h2>
     <ul>
@@ -169,13 +218,12 @@ function getUsageInstructions() {
       <li>如果使用优化功能，确保 <code>prompt</code> 中包含非 ASCII 字符。</li>
     </ul>
 
-    <p>如有任何问题，请随时联系支持团队！</p>
+    <p>如有任何问题，请随时联系 https://www.aisharenet.com/</p>
   </body>
   </html>
   `;
 }
 
-// 添加图形化用户界面功能
 function getGuiPage() {
   return `
   <!DOCTYPE html>
@@ -199,7 +247,7 @@ function getGuiPage() {
         <option value="0">不优化</option>
         <option value="1">优化</option>
       </select>
-      <p>优化选项说明: 选择“优化”将使生成的图像具有更丰富的细节和构图。</p><br>
+      <p>优化选项说明: 选择"优化"将使生成的图像具有更丰富的细节和构图。</p><br>
 
       <button type="submit">生成图像</button>
     </form>
@@ -215,7 +263,6 @@ function getGuiPage() {
         const size = document.getElementById('size').value;
         const optimization = document.getElementById('optimization').value;
 
-        // 更新状态信息
         document.getElementById('status').innerText = '正在处理请求...';
 
         try {
