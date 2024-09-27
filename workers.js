@@ -15,20 +15,17 @@ const ERROR_IMAGE_URLS = {
   'default': 'https://www.aisharenet.com/wp-content/uploads/2024/07/99dd797026b75ad.jpg'
 };
 
+let counter = 0
+
 // 获取下一个 API 密钥的函数
-async function getNextApiKey() {
-  let counter = await API_COUNTER.get('apiKeyCounter');
-  counter = counter ? parseInt(counter) : 0;
-  
-  const keys = await API_KEYS.get('imageApiKeys', 'json');
+function getNextApiKey() {
+  const keys = IMAGE_API_KEYS ? (IMAGE_API_KEYS.split(',') || []) : [];
   if (!keys || keys.length === 0) {
     throw new Error('No API keys available');
   }
   
   const key = keys[counter % keys.length];
-  
   counter = (counter + 1) % keys.length;
-  await API_COUNTER.put('apiKeyCounter', counter.toString());
   
   return key;
 }
@@ -41,10 +38,18 @@ async function handleRequest(request) {
   try {
     const url = new URL(request.url);
     
-    if (url.pathname === '/GUI/') {
+    if (url.pathname === '/gui/') {
       return new Response(getGuiPage(), {
         headers: { 'Content-Type': 'text/html' }
       });
+    }
+
+    const id = url.searchParams.get('id');
+    if (id) {
+      const imageUrl = await getImageURLfromStore(id);
+      if (imageUrl) {
+        return await fetchAndReturnImage(imageUrl);
+      }
     }
 
     const prompt = url.searchParams.get('prompt');
@@ -58,6 +63,16 @@ async function handleRequest(request) {
     const { size, optimization } = parseRequestParams(request);
     const processedPrompt = await getProcessedPrompt(prompt, optimization);
     const imageUrl = await getImageUrl(processedPrompt, size);
+    const imageId = await storeImageURL(imageUrl);
+    if (imageId) {
+      const currentUrl = new URL(request.url);
+      currentUrl.searchParams.set('id', imageId);
+      const newUrl = currentUrl.toString();
+      return new Response(null, {
+        status: 302,
+        headers: { 'Location': newUrl }
+      });
+    }
     return await fetchAndReturnImage(imageUrl);
   } catch (error) {
     console.error('Error in handleRequest:', error);
@@ -87,7 +102,7 @@ async function getProcessedPrompt(prompt, optimization) {
 }
 
 async function getImageUrl(prompt, size) {
-  const apiKey = await getNextApiKey();
+  const apiKey = getNextApiKey();
   try {
     const response = await fetch(IMAGE_API_URL, {
       method: 'POST',
@@ -122,6 +137,34 @@ async function getImageUrl(prompt, size) {
   }
 }
 
+async function getImageURLfromStore(imageId) {
+  if (typeof FLUX_API === 'undefined') {
+    return '';
+  }
+  const rawImageUrlMap = await FLUX_API.get('imageUrlMap');
+  if (!rawImageUrlMap) {
+    return '';
+  }
+  const imageUrlMap = JSON.parse(rawImageUrlMap) || [];
+  const foundImage = imageUrlMap.find(image => image.imageId === imageId);
+  return foundImage ? foundImage.imageUrl : '';
+}
+
+async function storeImageURL(imageUrl) {
+  if (typeof FLUX_API === 'undefined') {
+    return '';
+  }
+  const rawImageUrlMap = await FLUX_API.get('imageUrlMap');
+  let imageUrlMap = rawImageUrlMap ? JSON.parse(rawImageUrlMap) : [];
+  const imageId = Math.random().toString(36).substring(2, 15);
+  if (imageUrlMap.length >= 1000) {
+    imageUrlMap.shift()
+  }
+  imageUrlMap.push({ imageId, imageUrl });
+  await FLUX_API.put('imageUrlMap', JSON.stringify(imageUrlMap));
+  return imageId;
+}
+
 async function fetchAndReturnImage(imageUrl) {
   try {
     const imageResponse = await fetch(imageUrl);
@@ -141,7 +184,7 @@ async function fetchAndReturnImage(imageUrl) {
 }
 
 async function processPrompt(text, optimize) {
-  const processApiKey = await API_KEYS.get('processApiKey');
+  const processApiKey = PROCESS_API_KEY || '';
   const content = optimize 
     ? `
     # 优化以下图像prompt，保留prompt主要元素基础上使细节、构图更加丰富：
