@@ -40,12 +40,13 @@ https://your-worker-url/?prompt=一位女孩&size=512x512&optimization=1
 - `size` 参数应遵循 `宽度x高度` 格式。
 - 如果使用优化功能，确保 `prompt` 中包含非 ASCII 字符。
 
-## 重要配置参数
+## 项目依赖的免费API
 
 ### 1. 图像生成 API
 - **API 地址**: [https://api.siliconflow.cn/v1/image/generations](https://api.siliconflow.cn/v1/image/generations)
 - **申请地址**: [https://cloud.siliconflow.cn/](https://cloud.siliconflow.cn/)
 - **使用模型**: `black-forest-labs/FLUX.1-schnell`（免费模型）
+> 注意速率限制，建议申请多密钥轮询
 
 ### 2. 提示处理 API
 - **API 地址**: [https://open.bigmodel.cn/api/paas/v4/chat/completions](https://open.bigmodel.cn/api/paas/v4/chat/completions)
