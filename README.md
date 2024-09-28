@@ -88,6 +88,18 @@ https://your-worker-url/?prompt=一位女孩&size=512x512&optimization=1
 **PROCESS_API_KEY**
 输入一个KEY
 
+
+# 研究中...
+
+抽象出图片请求地址和KEY作为一对数据单独参与图片请求，这样可以方便支持不同的API（前提是请求数据格式相同），例如：
+
+`[
+  {"url": "https://api.siliconflow.cn/v1/image/generations", "key": "your-api-key-1"},
+  {"url": "https://api.siliconflow.cn/v1/image/generations", "key": "your-api-key-2"},
+  {"url": "https://your-worker-url.workers.dev/v1/image/generations", "key": "your-cloudflare-api-key"}
+]`
+
+
 ## 贡献
 欢迎提交问题和功能请求！如果您想为该项目贡献代码，请创建一个分支并提交 Pull Request。
 
