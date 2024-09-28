@@ -15,7 +15,15 @@ const ERROR_IMAGE_URLS = {
   'default': 'https://www.aisharenet.com/wp-content/uploads/2024/07/99dd797026b75ad.jpg'
 };
 
-let counter = 0
+// 计数器用于API密钥轮询
+let counter = 0;
+
+// 限流配置：单一访客60秒内最多5次请求
+const rateLimit = {
+  window: 120000, // 120秒
+  limit: 5,       // 每个访客最多5个请求
+  requests: {}    // 存储每个访客的请求记录，基于IP地址
+};
 
 // 获取下一个 API 密钥的函数
 function getNextApiKey() {
@@ -36,6 +44,13 @@ addEventListener('fetch', event => {
 
 async function handleRequest(request) {
   try {
+    const clientIp = request.headers.get('CF-Connecting-IP');
+    
+    // 检查是否超出限流
+    if (isRateLimited(clientIp)) {
+      return await fetchAndReturnImage(ERROR_IMAGE_URLS['429']);
+    }
+
     const url = new URL(request.url);
     
     if (url.pathname === '/gui/') {
@@ -76,11 +91,99 @@ async function handleRequest(request) {
     return await fetchAndReturnImage(imageUrl);
   } catch (error) {
     console.error('Error in handleRequest:', error);
-    return new Response(ERROR_IMAGE_URLS['default'], {
-      headers: { 'Content-Type': 'text/plain' }
-    });
+    return await fetchAndReturnImage(ERROR_IMAGE_URLS['default']);
   }
 }
+
+// 修改：检查是否超出限流的函数
+function isRateLimited(clientIp) {
+  const now = Date.now();
+  const clientRequests = rateLimit.requests[clientIp] || [];
+  
+  // 移除过期的请求记录
+  const validRequests = clientRequests.filter(timestamp => now - timestamp < rateLimit.window);
+  
+  if (validRequests.length >= rateLimit.limit) {
+    return true; // 超出限流
+  }
+  
+  // 添加新的请求记录
+  validRequests.push(now);
+  rateLimit.requests[clientIp] = validRequests;
+  
+  return false; // 未超出限流
+}async function handleRequest(request) {
+  try {
+    const clientIp = request.headers.get('CF-Connecting-IP');
+    
+    // 检查是否超出限流
+    if (isRateLimited(clientIp)) {
+      return await fetchAndReturnImage(ERROR_IMAGE_URLS['429']);
+    }
+
+    const url = new URL(request.url);
+    
+    if (url.pathname === '/gui/') {
+      return new Response(getGuiPage(), {
+        headers: { 'Content-Type': 'text/html' }
+      });
+    }
+
+    const id = url.searchParams.get('id');
+    if (id) {
+      const imageUrl = await getImageURLfromStore(id);
+      if (imageUrl) {
+        return await fetchAndReturnImage(imageUrl);
+      }
+    }
+
+    const prompt = url.searchParams.get('prompt');
+
+    if (!prompt) {
+      return new Response(getUsageInstructions(), {
+        headers: { 'Content-Type': 'text/html' }
+      });
+    }
+
+    const { size, optimization } = parseRequestParams(request);
+    const processedPrompt = await getProcessedPrompt(prompt, optimization);
+    const imageUrl = await getImageUrl(processedPrompt, size);
+    const imageId = await storeImageURL(imageUrl);
+    if (imageId) {
+      const currentUrl = new URL(request.url);
+      currentUrl.searchParams.set('id', imageId);
+      const newUrl = currentUrl.toString();
+      return new Response(null, {
+        status: 302,
+        headers: { 'Location': newUrl }
+      });
+    }
+    return await fetchAndReturnImage(imageUrl);
+  } catch (error) {
+    console.error('Error in handleRequest:', error);
+    return await fetchAndReturnImage(ERROR_IMAGE_URLS['default']);
+  }
+}
+
+// 修改：检查是否超出限流的函数
+function isRateLimited(clientIp) {
+  const now = Date.now();
+  const clientRequests = rateLimit.requests[clientIp] || [];
+  
+  // 移除过期的请求记录
+  const validRequests = clientRequests.filter(timestamp => now - timestamp < rateLimit.window);
+  
+  if (validRequests.length >= rateLimit.limit) {
+    return true; // 超出限流
+  }
+  
+  // 添加新的请求记录
+  validRequests.push(now);
+  rateLimit.requests[clientIp] = validRequests;
+  
+  return false; // 未超出限流
+}
+
 
 function parseRequestParams(request) {
   const url = new URL(request.url);
@@ -261,7 +364,8 @@ function getUsageInstructions() {
       <li>如果使用优化功能，确保 <code>prompt</code> 中包含非 ASCII 字符。</li>
     </ul>
 
-    <p>如有任何问题，请随时联系 https://www.aisharenet.com/</p>
+    <p>如有任何问题，请随时联系 <a href="https://www.aisharenet.com/">https://www.aisharenet.com/</a></p>
+
   </body>
   </html>
   `;
@@ -279,10 +383,10 @@ function getGuiPage() {
   <body>
     <h1>图像生成</h1>
     <form id="imageForm">
-      <label for="prompt">图像描述:</label><br>
+      <label for="prompt">图像描述:（支持输入中文）</label><br>
       <input type="text" id="prompt" required><br><br>
 
-      <label for="size">图像尺寸 (格式: 宽度x高度，默认: 512x512):</label><br>
+      <label for="size">图像尺寸 (格式: 宽度x高度，默认: 512x512，宽高不能超过1024):</label><br>
       <input type="text" id="size" value="512x512" required><br><br>
 
       <label for="optimization">是否优化:</label><br>
