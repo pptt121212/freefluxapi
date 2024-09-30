@@ -15,175 +15,107 @@ const ERROR_IMAGE_URLS = {
   'default': 'https://www.aisharenet.com/wp-content/uploads/2024/07/99dd797026b75ad.jpg'
 };
 
-// 计数器用于API密钥轮询
+// Counter for API key rotation
 let counter = 0;
 
-// 限流配置：单一访客60秒内最多5次请求
+// Rate limiting configuration: max 5 requests per visitor in 120 seconds
 const rateLimit = {
-  window: 120000, // 120秒
-  limit: 5,       // 每个访客最多5个请求
-  requests: {}    // 存储每个访客的请求记录，基于IP地址
+  window: 120000, // 120 seconds
+  limit: 5,       // 5 requests per visitor
+  requests: {}    // Store request records for each visitor, based on IP address
 };
-
-// 获取下一个 API 密钥的函数
-function getNextApiKey() {
-  const keys = IMAGE_API_KEYS ? (IMAGE_API_KEYS.split(',') || []) : [];
-  if (!keys || keys.length === 0) {
-    throw new Error('No API keys available');
-  }
-  
-  const key = keys[counter % keys.length];
-  counter = (counter + 1) % keys.length;
-  
-  return key;
-}
 
 addEventListener('fetch', event => {
   event.respondWith(handleRequest(event.request));
 });
 
 async function handleRequest(request) {
-  try {
-    const clientIp = request.headers.get('CF-Connecting-IP');
-    
-    // 检查是否超出限流
-    if (isRateLimited(clientIp)) {
-      return await fetchAndReturnImage(ERROR_IMAGE_URLS['429']);
-    }
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY = 1000; // 1 second
 
-    const url = new URL(request.url);
-    
-    if (url.pathname === '/gui/') {
-      return new Response(getGuiPage(), {
-        headers: { 'Content-Type': 'text/html' }
-      });
-    }
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const clientIp = request.headers.get('CF-Connecting-IP');
+      
+      if (isRateLimited(clientIp)) {
+        return await fetchAndReturnImage(ERROR_IMAGE_URLS['429']);
+      }
 
-    const id = url.searchParams.get('id');
-    if (id) {
-      const imageUrl = await getImageURLfromStore(id);
-      if (imageUrl) {
-        return await fetchAndReturnImage(imageUrl);
+      const url = new URL(request.url);
+      
+      if (url.pathname === '/gui/') {
+        return new Response(getGuiPage(), {
+          headers: { 'Content-Type': 'text/html' }
+        });
+      }
+
+      const id = url.searchParams.get('id');
+      if (id) {
+        const imageUrl = await getImageURLfromStore(id);
+        if (imageUrl) {
+          return await fetchAndReturnImage(imageUrl);
+        }
+      }
+
+      const prompt = url.searchParams.get('prompt');
+
+      if (!prompt) {
+        return new Response(getUsageInstructions(), {
+          headers: { 'Content-Type': 'text/html' }
+        });
+      }
+
+      const { size, optimization } = parseRequestParams(request);
+      const processedPrompt = await getProcessedPrompt(prompt, optimization);
+      const imageUrl = await getImageUrl(processedPrompt, size);
+      
+      if (imageUrl.startsWith('https://www.aisharenet.com/')) {
+        // If we get an error image URL, throw an error to trigger a retry
+        throw new Error(`Failed to generate image. Attempt ${attempt + 1} of ${MAX_RETRIES}`);
+      }
+
+      const imageId = await storeImageURL(imageUrl);
+      if (imageId) {
+        const currentUrl = new URL(request.url);
+        currentUrl.searchParams.set('id', imageId);
+        const newUrl = currentUrl.toString();
+        return new Response(null, {
+          status: 302,
+          headers: { 'Location': newUrl }
+        });
+      }
+      return await fetchAndReturnImage(imageUrl);
+    } catch (error) {
+      console.error(`Error in handleRequest (attempt ${attempt + 1}):`, error);
+      
+      if (attempt < MAX_RETRIES - 1) {
+        // Wait before retrying
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+      } else {
+        // If all retries fail, return the default error image
+        return await fetchAndReturnImage(ERROR_IMAGE_URLS['default']);
       }
     }
-
-    const prompt = url.searchParams.get('prompt');
-
-    if (!prompt) {
-      return new Response(getUsageInstructions(), {
-        headers: { 'Content-Type': 'text/html' }
-      });
-    }
-
-    const { size, optimization } = parseRequestParams(request);
-    const processedPrompt = await getProcessedPrompt(prompt, optimization);
-    const imageUrl = await getImageUrl(processedPrompt, size);
-    const imageId = await storeImageURL(imageUrl);
-    if (imageId) {
-      const currentUrl = new URL(request.url);
-      currentUrl.searchParams.set('id', imageId);
-      const newUrl = currentUrl.toString();
-      return new Response(null, {
-        status: 302,
-        headers: { 'Location': newUrl }
-      });
-    }
-    return await fetchAndReturnImage(imageUrl);
-  } catch (error) {
-    console.error('Error in handleRequest:', error);
-    return await fetchAndReturnImage(ERROR_IMAGE_URLS['default']);
   }
 }
 
-// 修改：检查是否超出限流的函数
 function isRateLimited(clientIp) {
   const now = Date.now();
   const clientRequests = rateLimit.requests[clientIp] || [];
   
-  // 移除过期的请求记录
+  // Remove expired request records
   const validRequests = clientRequests.filter(timestamp => now - timestamp < rateLimit.window);
   
   if (validRequests.length >= rateLimit.limit) {
-    return true; // 超出限流
+    return true; // Rate limit exceeded
   }
   
-  // 添加新的请求记录
+  // Add new request record
   validRequests.push(now);
   rateLimit.requests[clientIp] = validRequests;
   
-  return false; // 未超出限流
-}async function handleRequest(request) {
-  try {
-    const clientIp = request.headers.get('CF-Connecting-IP');
-    
-    // 检查是否超出限流
-    if (isRateLimited(clientIp)) {
-      return await fetchAndReturnImage(ERROR_IMAGE_URLS['429']);
-    }
-
-    const url = new URL(request.url);
-    
-    if (url.pathname === '/gui/') {
-      return new Response(getGuiPage(), {
-        headers: { 'Content-Type': 'text/html' }
-      });
-    }
-
-    const id = url.searchParams.get('id');
-    if (id) {
-      const imageUrl = await getImageURLfromStore(id);
-      if (imageUrl) {
-        return await fetchAndReturnImage(imageUrl);
-      }
-    }
-
-    const prompt = url.searchParams.get('prompt');
-
-    if (!prompt) {
-      return new Response(getUsageInstructions(), {
-        headers: { 'Content-Type': 'text/html' }
-      });
-    }
-
-    const { size, optimization } = parseRequestParams(request);
-    const processedPrompt = await getProcessedPrompt(prompt, optimization);
-    const imageUrl = await getImageUrl(processedPrompt, size);
-    const imageId = await storeImageURL(imageUrl);
-    if (imageId) {
-      const currentUrl = new URL(request.url);
-      currentUrl.searchParams.set('id', imageId);
-      const newUrl = currentUrl.toString();
-      return new Response(null, {
-        status: 302,
-        headers: { 'Location': newUrl }
-      });
-    }
-    return await fetchAndReturnImage(imageUrl);
-  } catch (error) {
-    console.error('Error in handleRequest:', error);
-    return await fetchAndReturnImage(ERROR_IMAGE_URLS['default']);
-  }
+  return false; // Not rate limited
 }
-
-// 修改：检查是否超出限流的函数
-function isRateLimited(clientIp) {
-  const now = Date.now();
-  const clientRequests = rateLimit.requests[clientIp] || [];
-  
-  // 移除过期的请求记录
-  const validRequests = clientRequests.filter(timestamp => now - timestamp < rateLimit.window);
-  
-  if (validRequests.length >= rateLimit.limit) {
-    return true; // 超出限流
-  }
-  
-  // 添加新的请求记录
-  validRequests.push(now);
-  rateLimit.requests[clientIp] = validRequests;
-  
-  return false; // 未超出限流
-}
-
 
 function parseRequestParams(request) {
   const url = new URL(request.url);
@@ -205,39 +137,59 @@ async function getProcessedPrompt(prompt, optimization) {
 }
 
 async function getImageUrl(prompt, size) {
-  const apiKey = getNextApiKey();
-  try {
-    const response = await fetch(IMAGE_API_URL, {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: "black-forest-labs/FLUX.1-schnell",
-        prompt,
-        image_size: size
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`API error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const imageUrl = data?.images?.[0]?.url;
-
-    if (!imageUrl) {
-      throw new Error('Unexpected API response format');
-    }
-
-    return imageUrl;
-  } catch (error) {
-    console.error('Error in getImageUrl:', error);
-    const statusCode = error.message.split(' ').pop();
-    return ERROR_IMAGE_URLS[statusCode] || ERROR_IMAGE_URLS['default'];
+  const keys = IMAGE_API_KEYS ? IMAGE_API_KEYS.split(',') : [];
+  if (!keys.length) {
+    console.error('No API keys available');
+    return ERROR_IMAGE_URLS['default'];
   }
+
+  // 创建一个包含所有索引的数组
+  const indices = Array.from({ length: keys.length }, (_, i) => i);
+  
+  // Fisher-Yates 洗牌算法，随机打乱索引顺序
+  for (let i = indices.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [indices[i], indices[j]] = [indices[j], indices[i]];
+  }
+
+  for (const index of indices) {
+    const apiKey = keys[index];
+    try {
+      const response = await fetch(IMAGE_API_URL, {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: "black-forest-labs/FLUX.1-schnell",
+          prompt,
+          image_size: size
+        })
+      });
+
+      if (!response.ok) {
+        console.error(`API error with key ${index + 1}: ${response.status}`);
+        continue; // 尝试下一个密钥
+      }
+
+      const data = await response.json();
+      const imageUrl = data?.images?.[0]?.url;
+
+      if (imageUrl) {
+        return imageUrl;
+      } else {
+        console.error(`Unexpected API response format with key ${index + 1}`);
+      }
+    } catch (error) {
+      console.error(`Error in getImageUrl with key ${index + 1}:`, error);
+    }
+  }
+
+  // 如果所有密钥都失败，返回默认错误图片
+  console.error('All API keys failed');
+  return ERROR_IMAGE_URLS['default'];
 }
 
 async function getImageURLfromStore(imageId) {
@@ -296,6 +248,7 @@ async function processPrompt(text, optimize) {
     ## 优化要求
     1. 优化后的图像prompt是一组<英文TAG标签>，每个TAG应该遵循构图的基本原则，将画风、构图、主体、动作、场景、元素、按顺序进行描述。
     2. <英文TAG标签>中每个词组用逗号","分割，逗号","前后不允许有"空格"。
+    3. 由多个单词串联的词组"_"连接
     # 仅仅输出优化后的图像prompt，不要有其他说明：
     `
     : `请将以下内容翻译为英文，保持原意：${text}`;
@@ -321,7 +274,7 @@ async function processPrompt(text, optimize) {
     return data.choices?.[0]?.message?.content?.trim() || text;
   } catch (error) {
     console.error('Error in processPrompt:', error);
-    return text; // 如果处理失败，返回原始文本
+    return text; // Return original text if processing fails
   }
 }
 
