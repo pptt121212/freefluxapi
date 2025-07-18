@@ -1,5 +1,6 @@
 # free flux api
-使用免费大模型构建的图像生成API https://www.aisharenet.com/
+使用免费大模型构建的图像生成API https://www.kdjingpai.com/
+更多优秀工具请访问AIGC软件库：https://aigcsoft.site/
 
 
 ## 描述
